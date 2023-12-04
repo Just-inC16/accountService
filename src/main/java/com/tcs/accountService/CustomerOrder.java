@@ -7,10 +7,6 @@ public class CustomerOrder {
 	private Double amount;
 	private Status status;
 
-//	private String item;
-//	private int quantity;
-//	private String paymentMode;
-//	private String address;
 	public Long getTransactionId() {
 		return transactionId;
 	}

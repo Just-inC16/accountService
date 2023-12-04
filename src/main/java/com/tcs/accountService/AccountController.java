@@ -29,10 +29,6 @@ public class AccountController {
 		return "Hello world! :)";
 	}
 
-//	@KafkaListener(topics = "new-orders")
-//	public String processTransaction2(String event) throws JsonMappingException, JsonProcessingException {
-//		return "Kafka listener works";
-//	}
 	@KafkaListener(topics = "new-orders")
 	public void processTransaction(String event) throws JsonMappingException, JsonProcessingException {
 
@@ -80,12 +76,10 @@ public class AccountController {
 
 	}
 
-//	@GetMapping("/account/{id}")
 	public Boolean isAccountAvailable(Long Id) {
 		return accountRepository.findByAccountId(Id) != null;
 	}
 
-//	@GetMapping("/account/{id}")
 	public Account updateAccountBalance(Account account, Double amount) {
 		Double newBalance = account.getBalance() + amount;
 		account.setBalance(newBalance);
