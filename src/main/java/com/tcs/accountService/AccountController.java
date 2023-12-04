@@ -15,13 +15,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class AccountController {
 	private AccountRepository accountRepository;
 	private KafkaTemplate<String, AccountEvent> kafkaTemplate;
-	private KafkaTemplate<String, TransactionEvent> kafkaOrderTemplate;
+	private KafkaTemplate<String, TransactionEvent> kafkaTransactionTemplate;
 
 	public AccountController(AccountRepository accountRepository, KafkaTemplate<String, AccountEvent> kafkaTemplate,
-			KafkaTemplate<String, TransactionEvent> kafkaOrderTemplate) {
+			KafkaTemplate<String, TransactionEvent> kafkaTransactionTemplate) {
 		this.accountRepository = accountRepository;
 		this.kafkaTemplate = kafkaTemplate;
-		this.kafkaOrderTemplate = kafkaOrderTemplate;
+		this.kafkaTransactionTemplate = kafkaTransactionTemplate;
 	}
 
 	@GetMapping
@@ -34,12 +34,15 @@ public class AccountController {
 
 		System.out.println("Recieved transaction event" + event);
 		TransactionEvent orderEvent = new ObjectMapper().readValue(event, TransactionEvent.class);
-		CustomerOrder order = orderEvent.getOrder();
+		CustomerOrder transaction = orderEvent.getOrder();
 
+		Long senderId = transaction.getSenderId();
+		Long receiverId = transaction.getReceiverId();
+		Double amount = transaction.getAmount();
+
+		Account senderAccount = accountRepository.findByAccountId(senderId);
+		Account receiverAccount = accountRepository.findByAccountId(receiverId);
 		try {
-			Long senderId = order.getSenderId();
-			Long receiverId = order.getReceiverId();
-			Double amount = order.getAmount();
 
 			if (amount <= 0.0) {
 				throw new Exception("You can't enter a negative or 0 amount.");
@@ -47,10 +50,14 @@ public class AccountController {
 			if (!(isAccountAvailable(senderId) && isAccountAvailable(receiverId))) {
 				throw new Exception("One of the accounts is not correctly entered.");
 			}
-			Account senderAccount = accountRepository.findByAccountId(senderId);
-			Account receiverAccount = accountRepository.findByAccountId(receiverId);
+			if (senderAccount.getBalance() < amount) {
+				throw new Exception("You have insufficient funds.");
+			}
+
 			updateAccountBalance(senderAccount, -amount);
 			updateAccountBalance(receiverAccount, +amount);
+			senderAccount.setStatus(Status.SUCCESS);
+			receiverAccount.setStatus(Status.SUCCESS);
 
 			// publish account created event for notification microservice to consume.
 
@@ -62,17 +69,27 @@ public class AccountController {
 			this.kafkaTemplate.send("new-transaction", accountEvent);
 		} catch (Exception e) {
 			System.out.println("Something went wrong!");
-//			payment.setOrderId(order.getOrderId());
-//			payment.setStatus("FAILED");
-//			this.repository.save(payment);
-//
-//			// reverse previous task
-//			OrderEvent oe = new OrderEvent();
-//			oe.setOrder(order);
-//			oe.setType("ORDER_REVERSED");
-//			this.kafkaOrderTemplate.send("reversed-orders", orderEvent);
+			// Set the status of the accounts to failure
+			if (senderAccount != null) {
+				senderAccount.setStatus(Status.FAILURE);
+				this.accountRepository.save(senderAccount);
+			}
+			if (receiverAccount != null) {
+				receiverAccount.setStatus(Status.FAILURE);
+				this.accountRepository.save(receiverAccount);
+			}
 
+			// reverse previous task
+			TransactionEvent transactionEvent = new TransactionEvent();
+			transactionEvent.setOrder(transaction);
+			transactionEvent.setType("TRANSACTION_REVERSED");
+			this.kafkaTransactionTemplate.send("reversed-transaction", transactionEvent);
 		}
+	}
+
+	@KafkaListener(topics = "reverse-account")
+	public void reverseOrder(String event) throws JsonMappingException, JsonProcessingException {
+		System.out.println("Reverse this account" + event);
 
 	}
 
